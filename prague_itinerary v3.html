@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Prague Trip (Customizable)</title>
+    
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            background-color: #f0f4f8;
+            touch-action: pan-y;
+            overscroll-behavior-y: none;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .tab-btn.active { color: #2563eb; border-bottom: 2px solid #2563eb; }
+        .leaflet-container { width: 100%; height: 100%; z-index: 1; }
+        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body>
+
+<div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-2xl relative overflow-hidden flex flex-col">
+
+    <header class="glass sticky top-0 z-20 px-4 pt-4 pb-2 border-b border-slate-100">
+        <div class="flex justify-between items-start mb-2">
+            <div>
+                <h1 class="text-xl font-black text-slate-800 tracking-wider flex items-center gap-2">
+                    Prague <span class="text-blue-500 text-xs bg-blue-100 px-2 py-0.5 rounded-full">2 Days</span>
+                </h1>
+                <p class="text-[10px] text-slate-400 font-bold mt-1">自訂行程版</p>
+            </div>
+            <div class="text-right">
+                <div class="text-[10px] text-slate-400 font-bold">參考匯率 (CZK)</div>
+                <div class="flex flex-col items-end">
+                    <span class="text-xs font-bold text-blue-600">1 Kč ≈ {{ rates.HKD }} HKD</span>
+                    <span class="text-xs font-bold text-green-600">1 Kč ≈ {{ rates.CAD }} CAD</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex space-x-2 overflow-x-auto no-scrollbar pb-1">
+            <button @click="view = 'todo'" 
+                    :class="['flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-all', view === 'todo' ? 'bg-slate-800 text-white shadow-lg' : 'bg-slate-100 text-slate-500']">
+                總覽
+            </button>
+            <button v-for="d in days" :key="d.date" @click="selectDate(d.date)"
+                    :class="['flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-all', selectedDate === d.date && view !== 'todo' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-slate-100 text-slate-500']">
+                {{ d.label }}
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-4 pb-24 scroll-smooth">
+        
+        <div v-if="view !== 'todo'" class="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-2xl mb-5 flex justify-between items-center shadow-sm border border-blue-100">
+            <div>
+                <div class="text-3xl font-black text-slate-700">5°C</div>
+                <div class="text-xs text-slate-500 font-bold mt-1"><i class="fas fa-snowflake mr-1"></i> 冬季寒冷</div>
+            </div>
+            <div class="text-right">
+                <div class="text-xs text-slate-400 font-bold">布拉格 (12月)</div>
+                <div class="text-[10px] text-slate-400">體感 3°C</div>
+            </div>
+        </div>
+
+        <div class="flex border-b border-slate-100 mb-4 sticky top-0 bg-white z-10" v-if="view !== 'todo'">
+            <button @click="tab = 'schedule'" :class="['tab-btn flex-1 py-2 text-xs font-bold', tab === 'schedule' ? 'active' : 'text-slate-400']">行程</button>
+            <button @click="tab = 'money'" :class="['tab-btn flex-1 py-2 text-xs font-bold', tab === 'money' ? 'active' : 'text-slate-400']">記帳</button>
+            <button @click="tab = 'shop'" :class="['tab-btn flex-1 py-2 text-xs font-bold', tab === 'shop' ? 'active' : 'text-slate-400']">購物</button>
+        </div>
+
+        <div v-if="view !== 'todo' && tab === 'schedule'" class="space-y-4 animate-fade-in">
+            <div class="h-40 bg-slate-100 rounded-2xl overflow-hidden shadow-inner border border-slate-200 relative">
+                <div :id="'map-' + selectedDate" class="leaflet-container"></div>
+            </div>
+
+            <div class="space-y-3">
+                <div v-for="(item, idx) in currentDayItems" :key="item.id" 
+                     @click="editItem('schedule', item)"
+                     class="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex gap-3 active:scale-[0.98] transition-transform cursor-pointer relative group">
+                    <div class="flex flex-col items-center min-w-[40px]">
+                        <span class="text-xs font-black text-slate-300">{{ item.time }}</span>
+                        <div class="h-full w-0.5 bg-slate-100 my-1 rounded-full"></div>
+                    </div>
+                    <div class="flex-1 pb-1">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-bold text-slate-800 text-sm">{{ item.title }}</h3>
+                            <span :class="['text-[10px] px-1.5 py-0.5 rounded font-bold', catColor(item.cat)]">{{ catName(item.cat) }}</span>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ item.desc }}</p>
+                    </div>
+                    <div class="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-slate-300">
+                        <i class="fas fa-pen"></i>
+                    </div>
+                </div>
+                <div v-if="currentDayItems.length === 0" class="text-center py-8 text-slate-400 text-xs">本日暫無行程</div>
+            </div>
+        </div>
+
+        <div v-if="view !== 'todo' && tab === 'money'" class="space-y-4">
+            <div class="bg-slate-800 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden">
+                <p class="text-xs text-slate-400 mb-1">本日總支出 (CZK)</p>
+                <h2 class="text-3xl font-black tracking-tight">Kč {{ dayTotal }}</h2>
+                <div class="mt-3 pt-3 border-t border-slate-600 grid grid-cols-2 gap-4">
+                    <div><p class="text-[10px] text-slate-400">約合 HKD</p><p class="font-bold text-blue-300">$ {{ (dayTotal * rates.HKD).toFixed(0) }}</p></div>
+                    <div><p class="text-[10px] text-slate-400">約合 CAD</p><p class="font-bold text-green-300">$ {{ (dayTotal * rates.CAD).toFixed(1) }}</p></div>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <div v-for="exp in currentDayExpenses" :key="exp.id" 
+                     @click="editItem('money', exp)"
+                     class="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 cursor-pointer active:bg-slate-50 transition">
+                    <div class="flex items-center gap-3">
+                        <div :class="['w-8 h-8 rounded-full flex items-center justify-center text-xs', exp.method === 'card' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600']">
+                            <i :class="exp.method === 'card' ? 'fas fa-credit-card' : 'fas fa-money-bill'"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-700 text-sm">{{ exp.title }}</div>
+                        </div>
+                    </div>
+                    <div class="font-black text-slate-800 text-sm">-{{ exp.amount }}</div>
+                </div>
+            </div>
+            <button @click="openModal('money')" class="w-full py-3 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 text-xs font-bold hover:bg-slate-50 transition">+ 記一筆 (Add Expense)</button>
+        </div>
+
+        <div v-if="view !== 'todo' && tab === 'shop'" class="space-y-3">
+             <div v-for="item in shoppingList" :key="item.id" 
+                  class="p-3 rounded-xl border flex justify-between items-center transition-all bg-white border-slate-100">
+                <div @click.stop="toggleDone(item, shoppingList)" class="cursor-pointer p-2 -ml-2">
+                    <div :class="['w-5 h-5 rounded border flex items-center justify-center transition-colors', item.done ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300']">
+                        <i class="fas fa-check text-[10px]" v-if="item.done"></i>
+                    </div>
+                </div>
+                <div @click="editItem('shop', item)" class="flex-1 cursor-pointer px-2">
+                    <div :class="['text-sm font-bold', item.done ? 'line-through text-slate-400' : 'text-slate-700']">{{ item.title }}</div>
+                    <div class="text-[10px] text-slate-400">預算: {{ item.price ? 'Kč ' + item.price : '-' }}</div>
+                </div>
+             </div>
+             <button @click="openModal('shop')" class="w-full py-3 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 text-xs font-bold hover:bg-slate-50 transition">+ 新增商品 (Add Item)</button>
+        </div>
+
+        <div v-if="view === 'todo'" class="space-y-6">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                <h3 class="font-bold text-slate-800 mb-3 border-l-4 border-blue-500 pl-2">旅程概覽</h3>
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="text-slate-500">總支出 (CZK)</span>
+                    <span class="font-black text-slate-700">{{ allExpensesTotal }}</span>
+                </div>
+                 <div class="flex justify-between text-xs mb-1">
+                    <span class="text-slate-500">HKD 總計</span>
+                    <span class="font-bold text-blue-600">$ {{ (allExpensesTotal * rates.HKD).toFixed(0) }}</span>
+                </div>
+                <div class="flex justify-between text-xs">
+                    <span class="text-slate-500">CAD 總計</span>
+                    <span class="font-bold text-green-600">$ {{ (allExpensesTotal * rates.CAD).toFixed(1) }}</span>
+                </div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold text-slate-800 border-l-4 border-orange-500 pl-2">行前待辦</h3>
+                </div>
+                <div v-for="t in todos" :key="t.id" 
+                     class="flex justify-between items-center py-3 border-b border-slate-50 last:border-0">
+                    <div class="flex items-center gap-3 cursor-pointer" @click="toggleDone(t, todos)">
+                        <div :class="['w-4 h-4 rounded border flex items-center justify-center', t.done ? 'bg-orange-500 border-orange-500 text-white' : 'border-slate-300']">
+                            <i class="fas fa-check text-[8px]" v-if="t.done"></i>
+                        </div>
+                        <span :class="['text-sm', t.done ? 'line-through text-slate-300' : 'text-slate-600']">{{ t.title }}</span>
+                    </div>
+                    <button @click.stop="deleteDirectly(t.id, todos)" class="text-slate-300 hover:text-red-500 p-2">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
+                <button @click="openModal('todo')" class="w-full mt-2 py-2 rounded-lg bg-orange-50 text-orange-600 text-xs font-bold hover:bg-orange-100 transition">+ 新增待辦</button>
+            </div>
+
+            <div class="p-4 rounded-xl bg-slate-50 text-center">
+                <button @click="resetData" class="text-red-400 text-[10px] font-bold underline">重置所有資料 (Reset)</button>
+            </div>
+        </div>
+    </main>
+
+    <button v-if="view !== 'todo' && tab === 'schedule'" @click="openModal('schedule')" 
+            class="absolute bottom-6 right-6 w-12 h-12 bg-slate-800 text-white rounded-full shadow-xl flex items-center justify-center active:scale-90 transition z-30">
+        <i class="fas fa-plus"></i>
+    </button>
+
+    <div v-if="showModal" class="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center animate-fade-in" @click.self="showModal = false">
+        <div class="bg-white w-full sm:w-[90%] rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl">
+            <h3 class="font-black text-xl text-slate-800 mb-4">{{ modalMode === 'add' ? '新增' : '編輯' }}項目</h3>
+            
+            <div v-if="modalType === 'schedule'" class="space-y-3">
+                <div class="flex gap-2">
+                    <input v-model="form.time" type="time" class="bg-slate-50 p-3 rounded-xl text-sm font-bold border-none w-1/3">
+                    <select v-model="form.cat" class="bg-slate-50 p-3 rounded-xl text-sm font-bold border-none flex-1">
+                        <option value="spot">📸 景點</option>
+                        <option value="food">🍽️ 美食</option>
+                        <option value="shop">🛍️ 購物</option>
+                        <option value="show">🎭 表演</option>
+                    </select>
+                </div>
+                <input v-model="form.title" placeholder="標題" class="w-full bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+                <textarea v-model="form.desc" placeholder="備註..." class="w-full bg-slate-50 p-3 rounded-xl text-sm border-none h-20"></textarea>
+                 <div class="flex gap-2">
+                     <input v-model.number="form.lat" type="number" placeholder="緯度 (Lat)" class="flex-1 bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+                     <input v-model.number="form.lng" type="number" placeholder="經度 (Lng)" class="flex-1 bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+                </div>
+            </div>
+
+            <div v-if="modalType === 'money'" class="space-y-3">
+                <input v-model="form.title" placeholder="消費項目" class="w-full bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+                <div class="flex gap-2">
+                    <input v-model.number="form.amount" type="number" placeholder="金額 (CZK)" class="flex-1 bg-slate-50 p-3 rounded-xl text-lg font-black border-none">
+                    <select v-model="form.method" class="w-1/3 bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+                        <option value="cash">現金</option>
+                        <option value="card">卡</option>
+                    </select>
+                </div>
+            </div>
+
+            <div v-if="modalType === 'shop'" class="space-y-3">
+                <input v-model="form.title" placeholder="商品名稱" class="w-full bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+                <input v-model.number="form.price" type="number" placeholder="預算 (CZK)" class="w-full bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+            </div>
+
+            <div v-if="modalType === 'todo'" class="space-y-3">
+                <input v-model="form.title" placeholder="待辦事項" class="w-full bg-slate-50 p-3 rounded-xl text-sm font-bold border-none">
+            </div>
+
+            <div class="flex gap-3 mt-6">
+                <button v-if="modalMode === 'edit'" @click="deleteFromModal" class="px-4 py-3 bg-red-50 text-red-500 rounded-xl font-bold text-xs">
+                    <i class="fas fa-trash-alt mr-1"></i>刪除
+                </button>
+                <div class="flex-1 flex gap-3">
+                    <button @click="showModal = false" class="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-bold text-sm">取消</button>
+                    <button @click="saveForm" class="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold text-sm">儲存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
+
+    // --- 硬編碼的預設資料 (Hardcoded Data) ---
+    const DEFAULT_DATA = {
+        schedule: [
+            // Day 1: 2025-12-12 舊城 & 查理大橋 & 小城區
+            { id: 101, date: '2025-12-12', time: '09:00', title: '舊城廣場 (Old Town Square)', cat: 'spot', desc: '拍照、欣賞廣場建築', lat: 50.0875, lng: 14.4214 },
+            { id: 102, date: '2025-12-12', time: '10:00', title: '天文鐘 (Astronomical Clock)', cat: 'spot', desc: '整點看鐘表報時，可登塔俯瞰廣場', lat: 50.0869, lng: 14.4208 },
+            { id: 103, date: '2025-12-12', time: '10:30', title: '猶太區 (Josefov)', cat: 'spot', desc: '參觀舊猶太墓地與博物館', lat: 50.0905, lng: 14.4174 },
+            { id: 104, date: '2025-12-12', time: '12:00', title: '午餐', cat: 'food', desc: '廣場附近捷克餐廳', lat: 50.0870, lng: 14.4200 },
+            { id: 105, date: '2025-12-12', time: '13:00', title: '火藥塔 (Powder Tower)', cat: 'spot', desc: '新城重要地標，可登塔拍照', lat: 50.0875, lng: 14.4277 },
+            { id: 106, date: '2025-12-12', time: '14:00', title: '查理大橋 (Charles Bridge)', cat: 'spot', desc: '欣賞橋上雕像與伏爾塔瓦河景', lat: 50.0865, lng: 14.4116 },
+            { id: 107, date: '2025-12-12', time: '15:00', title: '小城廣場 (Lesser Town Square)', cat: 'spot', desc: '小城區建築、拍照', lat: 50.0875, lng: 14.4055 },
+            { id: 108, date: '2025-12-12', time: '16:00', title: '聖尼古拉教堂 (Lesser Town)', cat: 'spot', desc: '參觀巴洛克建築', lat: 50.0875, lng: 14.4042 },
+            { id: 109, date: '2025-12-12', time: '17:00', title: '伏爾塔瓦河遊船', cat: 'show', desc: '約 1 小時遊船，欣賞橋與河岸建築', lat: 50.0845, lng: 14.4140 },
+            { id: 110, date: '2025-12-12', time: '18:00', title: '晚餐', cat: 'food', desc: '河邊餐廳或廣場附近餐廳', lat: 50.0850, lng: 14.4100 },
+            { id: 111, date: '2025-12-12', time: '19:30', title: '黑光劇場 (Black Light Theatre)', cat: 'show', desc: '約 90 分鐘表演，燈光舞台秀', lat: 50.0840, lng: 14.4200 },
+            
+            // Day 2: 2025-12-13 布拉格城堡 & 新城
+            { id: 201, date: '2025-12-13', time: '09:00', title: '布拉格城堡 (Prague Castle)', cat: 'spot', desc: '聖維特大教堂、皇宮、黃金巷，早點避人潮', lat: 50.0906, lng: 14.4017 },
+            { id: 202, date: '2025-12-13', time: '12:00', title: '午餐', cat: 'food', desc: '城堡區附近餐廳', lat: 50.0900, lng: 14.4000 },
+            { id: 203, date: '2025-12-13', time: '13:00', title: '佩特任瞭望塔 (Petrin Tower)', cat: 'spot', desc: '搭纜車上山，參觀瞭望塔與迷宮', lat: 50.0835, lng: 14.3951 },
+            { id: 204, date: '2025-12-13', time: '14:30', title: '列侖廣場 (Wenceslas Square)', cat: 'spot', desc: '參觀廣場及周邊主要建築', lat: 50.0818, lng: 14.4285 },
+            { id: 205, date: '2025-12-13', time: '15:30', title: '新城主要街道短逛', cat: 'shop', desc: 'Na Příkopě 街道商店或歷史建築', lat: 50.0840, lng: 14.4260 },
+            { id: 206, date: '2025-12-13', time: '16:30', title: '老市政廳周邊小景點', cat: 'spot', desc: '快速參觀或拍外觀', lat: 50.0850, lng: 14.4200 },
+            { id: 207, date: '2025-12-13', time: '17:30', title: '晚餐', cat: 'food', desc: '新城河邊餐廳或廣場附近餐廳', lat: 50.0840, lng: 14.4100 },
+            { id: 208, date: '2025-12-13', time: '19:00', title: '古典音樂會 / 歌劇 / 芭蕾表演', cat: 'show', desc: '約 1.5 小時，選擇國家歌劇院或歷史教堂音樂會', lat: 50.0845, lng: 14.4280 },
+            { id: 209, date: '2025-12-13', time: '20:30', title: '回酒店', cat: 'spot', desc: '晚間結束，休息', lat: 50.0875, lng: 14.4214 },
+        ],
+        // 配合新日期調整預設支出
+        expenses: [
+            { id: 1, date: '2025-12-12', title: '天文鐘登塔門票', amount: 300, method: 'cash' },
+            { id: 2, date: '2025-12-12', title: '午餐燉肉', amount: 650, method: 'card' },
+            { id: 3, date: '2025-12-13', title: '城堡區通票', amount: 450, method: 'card' },
+            { id: 4, date: '2025-12-13', title: '纜車票', amount: 60, method: 'cash' },
+            { id: 5, date: '2025-12-12', title: '黑光劇場門票', amount: 900, method: 'card' },
+        ],
+        shop: [
+            { id: 1, title: '水晶杯', price: 1200, done: false },
+            { id: 2, title: '木偶玩具', price: 450, done: false }
+        ],
+        todos: [
+            { id: 1, title: '預訂黑光劇場門票', done: false },
+            { id: 2, title: '下載離線地圖', done: false }
+        ]
+    };
+
+    // 更改儲存 Key，確保舊瀏覽器不會讀取到舊的行程數據
+    const STORAGE_KEY = 'prague_trip_v2025_dec_fixed_v3'; 
+
+    createApp({
+        setup() {
+            // State
+            const view = ref('schedule');
+            const tab = ref('schedule');
+            const selectedDate = ref('2025-12-12'); // Updated initial date
+            const days = ref([ // Updated dates
+                { date: '2025-12-12', label: 'Day 1' },
+                { date: '2025-12-13', label: 'Day 2' }
+            ]);
+            // Kept rates as is
+            const rates = ref({ HKD: 0.34, CAD: 0.06 });
+
+            const schedule = ref([]);
+            const expenses = ref([]);
+            const shoppingList = ref([]);
+            const todos = ref([]);
+
+            // Modal
+            const showModal = ref(false);
+            const modalType = ref('');
+            const modalMode = ref('add');
+            // Added lat/lng default values
+            const form = ref({ lat: null, lng: null }); 
+
+            // Load Data
+            const loadData = () => {
+                const stored = localStorage.getItem(STORAGE_KEY);
+                if (stored) {
+                    const data = JSON.parse(stored);
+                    schedule.value = data.schedule;
+                    expenses.value = data.expenses;
+                    shoppingList.value = data.shop;
+                    todos.value = data.todos;
+                } else {
+                    resetData();
+                }
+            };
+
+            const resetData = () => {
+                schedule.value = JSON.parse(JSON.stringify(DEFAULT_DATA.schedule));
+                expenses.value = JSON.parse(JSON.stringify(DEFAULT_DATA.expenses));
+                shoppingList.value = JSON.parse(JSON.stringify(DEFAULT_DATA.shop));
+                todos.value = JSON.parse(JSON.stringify(DEFAULT_DATA.todos));
+                save();
+                window.location.reload();
+            };
+
+            const save = () => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    schedule: schedule.value,
+                    expenses: expenses.value,
+                    shop: shoppingList.value,
+                    todos: todos.value
+                }));
+            };
+
+            // Computed
+            const currentDayItems = computed(() => {
+                return schedule.value
+                    .filter(i => i.date === selectedDate.value)
+                    .sort((a, b) => a.time.localeCompare(b.time));
+            });
+
+            const currentDayExpenses = computed(() => expenses.value.filter(e => e.date === selectedDate.value));
+            const dayTotal = computed(() => currentDayExpenses.value.reduce((sum, e) => sum + e.amount, 0));
+            
+            const allExpensesTotal = computed(() => expenses.value.reduce((sum, e) => sum + e.amount, 0));
+
+            // Helpers
+            // Added 'show' category
+            const catName = (c) => ({ spot: '景點', food: '美食', shop: '購物', show: '表演' }[c] || '其他');
+            // Added 'show' color
+            const catColor = (c) => ({ spot: 'bg-indigo-100 text-indigo-600', food: 'bg-orange-100 text-orange-600', shop: 'bg-pink-100 text-pink-600', show: 'bg-yellow-100 text-yellow-600' }[c]);
+
+            // Actions
+            const selectDate = (d) => {
+                selectedDate.value = d;
+                view.value = 'day';
+                tab.value = 'schedule'; // Force show schedule tab
+                nextTick(initMap);
+            };
+
+            const openModal = (type) => {
+                modalType.value = type;
+                modalMode.value = 'add';
+                form.value = { 
+                    date: selectedDate.value, 
+                    time: new Date().toTimeString().slice(0, 5), // Current time for convenience
+                    cat: 'spot', 
+                    method: 'cash', 
+                    title: '', 
+                    done: false,
+                    lat: null,
+                    lng: null
+                };
+                showModal.value = true;
+            };
+
+            const editItem = (type, item) => {
+                modalType.value = type;
+                modalMode.value = 'edit';
+                // Use spread operator for copy
+                form.value = { ...item }; 
+                showModal.value = true;
+            };
+
+            const saveForm = () => {
+                const data = { ...form.value };
+                let targetList;
+                if (modalType.value === 'schedule') targetList = schedule;
+                else if (modalType.value === 'money') targetList = expenses;
+                else if (modalType.value === 'shop') targetList = shoppingList;
+                else if (modalType.value === 'todo') targetList = todos;
+
+                if (modalMode.value === 'edit') {
+                    const idx = targetList.value.findIndex(i => i.id === data.id);
+                    if (idx !== -1) targetList.value[idx] = data;
+                } else {
+                    data.id = Date.now();
+                    targetList.value.push(data);
+                }
+                save();
+                showModal.value = false;
+                if(modalType.value === 'schedule') nextTick(initMap);
+            };
+
+            const deleteFromModal = () => {
+                if(!confirm('確定刪除此項目?')) return;
+                let targetList;
+                if (modalType.value === 'schedule') targetList = schedule;
+                else if (modalType.value === 'money') targetList = expenses;
+                else if (modalType.value === 'shop') targetList = shoppingList;
+                else if (modalType.value === 'todo') targetList = todos;
+
+                targetList.value = targetList.value.filter(i => i.id !== form.value.id);
+                save();
+                showModal.value = false;
+                if(modalType.value === 'schedule') nextTick(initMap);
+            };
+
+            const deleteDirectly = (id, list) => {
+                 if(!confirm('確定刪除?')) return;
+                 const idx = list.findIndex(i => i.id === id);
+                 if(idx !== -1) {
+                     list.splice(idx, 1);
+                     save();
+                 }
+            };
+
+            const toggleDone = (item, list) => {
+                item.done = !item.done;
+                save();
+            };
+
+            // Map Logic
+            let mapInstance = null;
+            const initMap = () => {
+                const containerId = 'map-' + selectedDate.value;
+                const container = document.getElementById(containerId);
+                if (!container) return; // Map container must exist
+
+                if (mapInstance) {
+                    mapInstance.off();
+                    mapInstance.remove();
+                    mapInstance = null;
+                }
+                
+                container.innerHTML = ''; 
+
+                const itemsWithCoords = currentDayItems.value.filter(item => item.lat && item.lng);
+                
+                if (itemsWithCoords.length === 0) {
+                     // Set a default view for the city if no points
+                    mapInstance = L.map(containerId, { zoomControl: false }).setView([50.0875, 14.4214], 13);
+                } else {
+                     // Set map view to the first point
+                    mapInstance = L.map(containerId, { zoomControl: false }).setView([itemsWithCoords[0].lat, itemsWithCoords[0].lng], 13);
+                }
+
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                    attribution: 'OpenStreetMap'
+                }).addTo(mapInstance);
+
+                const markers = [];
+                itemsWithCoords.forEach(item => {
+                    if (item.lat && item.lng) {
+                        const marker = L.marker([item.lat, item.lng]).addTo(mapInstance)
+                            .bindPopup(`<b>${item.title}</b><br>${item.time} - ${catName(item.cat)}`);
+                        markers.push([item.lat, item.lng]);
+                    }
+                });
+
+                if (markers.length > 1) {
+                    mapInstance.fitBounds(markers, { padding: [30, 30] });
+                } else if (markers.length === 1) {
+                    mapInstance.setView(markers[0], 15);
+                }
+            };
+
+            watch(() => tab.value, (newTab) => {
+                if (newTab === 'schedule') nextTick(initMap);
+            });
+
+            onMounted(() => {
+                loadData();
+                selectDate(selectedDate.value); // Initialize map and view with the new date
+            });
+
+            return {
+                view, tab, selectedDate, days, rates,
+                schedule, expenses, shoppingList, todos,
+                currentDayItems, currentDayExpenses, dayTotal, allExpensesTotal,
+                catName, catColor,
+                selectDate, openModal, editItem, saveForm, deleteFromModal, deleteDirectly, toggleDone,
+                showModal, modalType, modalMode, form,
+                save, resetData
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
